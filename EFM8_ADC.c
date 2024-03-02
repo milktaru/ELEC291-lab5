@@ -192,6 +192,34 @@ float Volts_at_Pin(unsigned char pin)
 	 return ((ADC_at_Pin(pin)*VDD)/0b_0011_1111_1111_1111);
 }
 
+
+unsigned int GET_ADC (void) {
+	ADINT = 0;
+	AD0BUSY = 1;
+	while (!ADINT); // Wait for conversion to complete
+	return (ADC0);
+}
+
+
+/*
+// Start tracking the reference signal
+AMX0P=LQFP32_MUX_P1_7;
+ADINT = 0;
+AD0BUSY=1;
+while (!ADINT); // Wait for conversion to complete
+// Reset the timer
+TL0=0;
+TH0=0;
+while (Get_ADC()!=0); // Wait for the signal to be zero
+while (Get_ADC()==0); // Wait for the signal to be positive
+TR0=1; // Start the timer 0
+while (Get_ADC()!=0); // Wait for the signal to be zero again
+TR0=0; // Stop timer 0
+half_period=TH0*256.0+TL0; // The 16-bit number [TH0-TL0]
+// Time from the beginning of the sine wave to its peak
+overflow_count=65536-(half_period/2);
+*/
+
 void main (void)
 {
 	float v[4];
