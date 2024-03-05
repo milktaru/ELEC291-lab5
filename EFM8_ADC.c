@@ -238,24 +238,54 @@ void main (void)
 
 	/* Measure half period using fast ADC in EFM8 */
 	// Start tracking the reference signal
-	AMX0P=LQFP32_MUX_P1_7;
-	ADINT = 0;
-	AD0BUSY=1;
-	while (!ADINT); // Wait for conversion to complete
+	// AMX0P=LQFP32_MUX_P1_7;
+	// ADINT = 0;
+	// AD0BUSY=1;
+	// while (!ADINT); // Wait for conversion to complete
 	// Reset the timer
-	TL0=0;
-	TH0=0;
-	while (Get_ADC()!=0); // Wait for the signal to be zero
-	while (Get_ADC()==0); // Wait for the signal to be positive
-	TR0=1; // Start the timer 0	
-	while (Get_ADC()!=0); // Wait for the signal to be zero again
-	TR0=0; // Stop timer 0
-	half_period=TH0*256.0+TL0; // The 16-bit number [TH0-TL0]
+	// TL0=0;
+	// TH0=0;
+	// while (Get_ADC()!=0); // Wait for the signal to be zero
+	// while (Get_ADC()==0); // Wait for the signal to be positive
+	// TR0=1; // Start the timer 0	
+	// while (Get_ADC()!=0); // Wait for the signal to be zero again
+	// TR0=0; // Stop timer 0
+	// half_period=TH0*256.0+TL0; // The 16-bit number [TH0-TL0]
 	// Time from the beginning of the sine wave to its peak
-	overflow_count=65536-(half_period/2); // 2^16 - (half_period/2);
+	// overflow_count=65536-(half_period/2); // 2^16 - (half_period/2);
 
-	if (Get_ADC() == 0) {
-		
+	ADC0MX = QFP32_MUX_P2_5;    // Set ADC input channel
+	ADINT = 0;
+	ADBUSY = 1;
+	while (!ADINT);              // Wait for conversion to complete
+	while (Get_ADC() != 0);      // Wait for signal to be 0
+	while (Get_ADC() == 0);      // Wait for signal to be positive
+
+	// Reset timer
+	overflow_count = 0;
+	TL0 = 0;
+	TH0 = 0;
+	TR0 = 1;                     // Start timer 0
+
+	// Wait until ADC signal becomes 0 again while monitoring timer overflows
+	while (Get_ADC() != 0) {
+		if (TF0 == 1) {          // Check if Timer 0 overflow occurred
+			TF0 = 0;              // Clear Timer 0 overflow flag
+			overflow_count++;     // Increment overflow count
+		}
 	}
+
+	TR0 = 0;                     // Stop timer 0
+
+	// Calculate half period using the overflow count and timer values
+	halfPeriod_ref = (overflow_count * 65536.0 + TH0 * 256.0 + TL0) * (12.0 / SYSCLK);
+
+	// sample ADC at a quarter period:
+	quarter_period = halfPeriod_ref / 2.0;
+
+	// Check if we have reached a quarter period
+    if (overflow_count * 65536.0 + TH0 * 256.0 + TL0 >= halfPeriod_ref / 4.0) {
+           unsigned int peak_value = Get_ADC();
+
 }	
 
