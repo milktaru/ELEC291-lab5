@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <EFM8LB1.h>
+#include <math.h>
 
 // ~C51~  
 
@@ -14,12 +15,20 @@
 #define BAUDRATE 115200L
 #define SARCLK 18000000L
 
+unsigned char overflow_count = 0; // Change was made to overflow_count, and is now global
+
+unsigned int GET_ADC (void);
+
+//unsigned char overflow_count;
+
+
+
 char _c51_external_startup (void)
 {
 	// Disable Watchdog with key sequence
 	SFRPAGE = 0x00;
 	WDTCN = 0xDE; //First key
-	WDTCN = 0xAD; //Second key
+	WDTCN = 0xAD; //4Second key
   
 	VDM0CN=0x80;       // enable VDD monitor
 	RSTSRC=0x02|0x04;  // Enable reset on missing clock detector and VDD
@@ -194,14 +203,115 @@ float Volts_at_Pin(unsigned char pin)
 
 unsigned int GET_ADC (void) {
 	ADINT = 0;
-	AD0BUSY = 1;
+	ADBUSY = 1;
 	while (!ADINT); // Wait for conversion to complete
 	return (ADC0);
 }
 
-void main (void)
+void TIMER0_Init(void)
 {
-	float v[4];
+	TMOD&=0b_1111_0000; // Set the bits of Timer/Counter 0 to zero
+	TMOD|=0b_0000_0001; // Timer/Counter 0 used as a 16-bit timer
+	TR0=0; // Stop Timer/Counter 0
+}
+
+void LCD_byte (unsigned char x)
+{
+	// The accumulator in the C8051Fxxx is bit addressable!
+	ACC=x; //Send high nible
+	LCD_D7=ACC_7;
+	LCD_D6=ACC_6;
+	LCD_D5=ACC_5;
+	LCD_D4=ACC_4;
+	LCD_pulse();
+	Timer3us(40);
+	ACC=x; //Send low nible
+	LCD_D7=ACC_3;
+	LCD_D6=ACC_2;
+	LCD_D5=ACC_1;
+	LCD_D4=ACC_0;
+	LCD_pulse();
+}
+
+void WriteData (unsigned char x)
+{
+	LCD_RS=1;
+	LCD_byte(x);
+	waitms(2);
+}
+
+void WriteCommand (unsigned char x)
+{
+	LCD_RS=0;
+	LCD_byte(x);
+	waitms(5);
+}
+
+void LCD_4BIT (void)
+{
+	LCD_E=0; // Resting state of LCD's enable is zero
+	// LCD_RW=0; // We are only writing to the LCD in this program
+	waitms(20);
+	// First make sure the LCD is in 8-bit mode and then change to 4-bit mode
+	WriteCommand(0x33);
+	WriteCommand(0x33);
+	WriteCommand(0x32); // Change to 4-bit mode
+
+	// Configure the LCD
+	WriteCommand(0x28);
+	WriteCommand(0x0c);
+	WriteCommand(0x01); // Clear screen command (takes some time)
+	waitms(20); // Wait for clear screen command to finsih.
+}
+
+void LCDprint(char * string, unsigned char line, bit clear)
+{
+	int j;
+
+	WriteCommand(line==2?0xc0:0x80);
+	waitms(5);
+	for(j=0; string[j]!=0; j++)	WriteData(string[j]);// Write the message
+	if(clear) for(; j<CHARS_PER_LINE; j++) WriteData(' '); // Clear the rest of the line
+}
+
+int getsn (char * buff, int len)
+{
+	int j;
+	char c;
+	
+	for(j=0; j<(len-1); j++)
+	{
+		c=getchar();
+		if ( (c=='\n') || (c=='\r') )
+		{
+			buff[j]=0;
+			return j;
+		}
+		else
+		{
+			buff[j]=c;
+		}
+	}
+	buff[j]=0;
+	return len;
+}
+
+void main (void) {
+
+	float period_ref = 0;
+	float halfPeriod_ref = 0;
+	float quarter_period = 0;
+//	float v[4];
+//	float peak_value_ref;
+//	float peak_value;
+//	float peak_value_ref_rms;
+//	float peak_value_rms;
+	float period = 0;
+	int phase_check_ref = 0;
+	int phase_check = 0;
+	int i = 0;
+	float noise_filter = 0;
+	float max_distance = 0;
 
     waitms(500); // Give PuTTy a chance to start before sending
 	printf("\x1b[2J"); // Clear screen using ANSI escape sequence.
@@ -214,78 +324,97 @@ void main (void)
 	InitPinADC(2, 5); // Configure P2.5 as analog input
 	InitPinADC(2, 6); // Configure P2.6 as analog input
     InitADC();
+    TIMER0_Init();
 
-	while(1)
-	{
-	    // Read 14-bit value from the pins configured as analog inputs
-		v[0] = Volts_at_Pin(QFP32_MUX_P2_5);
-		v[1] = Volts_at_Pin(QFP32_MUX_P2_6);
-		printf ("V @ P2.5 = %7.5fV, V @ P2.6 = %7.5fV\r", v[0], v[1]);
-		waitms(500);
-	}
+	while(1) {
 
-	/* Measure half period at pin P1.0 using timer 0 */
-	// TR0=0; // Stop timer 0
-	// TMOD=0B_0000_0001; // Set timer 0 as 16-bit timer
-	// TH0=0; TL0=0; // Reset the timer
-	// while (P1_0==1); // Wait for the signal to be zero
-	// while (P1_0==0); // Wait for the signal to be one
-	// TR0=1; // Start timing
-	// while (P1_0==1); // Wait for the signal to be zero
-	// TR0=0; // Stop timer 0
-	// [TH0,TL0] is half the period in multiples of 12/CLK, so:
-	// Period=(TH0*0x100+TL0)*2; // Assume Period is unsigned int
+		// Reset the counter
+		/*Start Comment
+		TR0=0;
+		TL0=0; 
+		TH0=0;
+		TF0=0;
+		overflow_count=0;
+		
 
-	/* Measure half period using fast ADC in EFM8 */
-	// Start tracking the reference signal
-	// AMX0P=LQFP32_MUX_P1_7;
-	// ADINT = 0;
-	// AD0BUSY=1;
-	// while (!ADINT); // Wait for conversion to complete
-	// Reset the timer
-	// TL0=0;
-	// TH0=0;
-	// while (Get_ADC()!=0); // Wait for the signal to be zero
-	// while (Get_ADC()==0); // Wait for the signal to be positive
-	// TR0=1; // Start the timer 0	
-	// while (Get_ADC()!=0); // Wait for the signal to be zero again
-	// TR0=0; // Stop timer 0
-	// half_period=TH0*256.0+TL0; // The 16-bit number [TH0-TL0]
-	// Time from the beginning of the sine wave to its peak
-	// overflow_count=65536-(half_period/2); // 2^16 - (half_period/2);
-
-	ADC0MX = QFP32_MUX_P2_5;    // Set ADC input channel
-	ADINT = 0;
-	ADBUSY = 1;
-	while (!ADINT);              // Wait for conversion to complete
-	while (Get_ADC() != 0);      // Wait for signal to be 0
-	while (Get_ADC() == 0);      // Wait for signal to be positive
-
-	// Reset timer
-	overflow_count = 0;
-	TL0 = 0;
-	TH0 = 0;
-	TR0 = 1;                     // Start timer 0
-
-	// Wait until ADC signal becomes 0 again while monitoring timer overflows
-	while (Get_ADC() != 0) {
-		if (TF0 == 1) {          // Check if Timer 0 overflow occurred
-			TF0 = 0;              // Clear Timer 0 overflow flag
-			overflow_count++;     // Increment overflow count
+		while(P2_1!=0); // Wait for the signal to be zero
+		while(P2_1!=1); // Wait for the signal to be one
+		TR0=1; // Start the timer
+		while(P2_1!=0) // Wait for the signal to be zero
+		{
+			if(TF0==1) // Did the 16-bit timer overflow?
+			{
+				TF0=0;
+				overflow_count++;
+			}
 		}
+		TR0=0; // Stop timer 0, the 24-bit number [overflow_count-TH0-TL0] has the period!
+		period=2*(overflow_count*65536.0+TH0*256.0+TL0)*(12.0/SYSCLK); // in microsecs
+		// Send the period to the serial port
+		printf( "\rT=%f ms    ", period*1000);
+		End Comment*/ 
+		
+		/*/
+		/* Measure half period at pin P1.0 using timer 0 */
+			
+		for(i = 0; i < 5; i++) {
+			TR0=0; // Stop timer 0
+			TH0=0; TL0=0; // Reset the timer
+			TF0 = 0; overflow_count = 0;
+			overflow_count = 0;
+			while (P2_1 == 1); // Wait for the signal to be zero
+			while (P2_1 == 0); // Wait for the signal to be one
+			TR0=1; // Start timing
+			Timer3us(10);
+			while (P2_1 == 1) {
+				if(TF0 == 1) {
+					overflow_count++;
+					TF0 = 0;
+				}
+			} // Wait for the signal to be zero
+			TR0 = 0; // Stop timer 0
+			
+			period = ((overflow_count * 65536.0 + TH0 * 256.0 + TL0)* (12.0 / SYSCLK));
+	
+			TR0 = 0; // Stop timer 0
+			TH0 = 0; TL0 = 0; // Reset the timer
+			TF0 = 0; overflow_count = 0;
+			overflow_count = 0;
+			while (P2_1 == 1); // Wait for the signal to be zero
+			while (P2_1 == 0); // Wait for the signal to be one
+			TR0 = 1; // Start timing
+			Timer3us(10);
+			while (P2_1 == 1){
+				if(TF0 == 1){
+					overflow_count++;
+					TF0 = 0;
+				}
+			} // Wait for the signal to be zero
+			TR0 = 0; // Stop timer 0
+			//[TH0,TL0] is half the period in multiples of 12/CLK, so:
+			 // Assume Period is unsigned int
+			// make sure the distance between consecutive measurements have a reasonable distance
+			noise_filter = ((overflow_count * 65536.0 + TH0 * 256.0 + TL0)* (12.0 / SYSCLK));
+
+			if (fabsf( (1.0/(2.0*noise_filter)) - (1.0/(2.0*period))) > max_distance){
+				max_distance = abs(noise_filter - period);
+				//printf("%.5f\n", fabsf( (1.0/(2.0*noise_filter)) - (1.0/(2.0*period))));
+
+			}
+		}
+		
+		//printf("max distance: %f\n", max_distance);
+		
+		if (max_distance < 0.0001){
+			//printf("\n overflow_count: %d\n", overflow_count);
+			//printf("Timer0 High: %u\n", TH0*0x100);
+			//printf("Timer0 Low: %u\n", TL0);
+			waitms(400);
+			printf("\nPeriod: %.5f ms", 2*noise_filter*1000);
+			printf("\nFrequency: %.5f Hz", 1/(2*noise_filter));
+		}
+
+		period_ref = 2*noise_filter*1000;
+
 	}
-
-	TR0 = 0;                     // Stop timer 0
-
-	// Calculate half period using the overflow count and timer values
-	halfPeriod_ref = (overflow_count * 65536.0 + TH0 * 256.0 + TL0) * (12.0 / SYSCLK);
-
-	// sample ADC at a quarter period:
-	quarter_period = halfPeriod_ref / 2.0;
-
-	// Check if we have reached a quarter period
-    if (overflow_count * 65536.0 + TH0 * 256.0 + TL0 >= halfPeriod_ref / 4.0) {
-           unsigned int peak_value = Get_ADC();
-
-}	
-
+}
