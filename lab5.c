@@ -9,6 +9,7 @@
 #include <EFM8LB1.h>
 #include <math.h>
 
+
 // ~C51~  
 
 #define SYSCLK 72000000L
@@ -324,13 +325,13 @@ void main (void)
 	// calculations
 	float period = 0;
 	float signal_period = 0;
-	int i = 0;
 	float noise_filter = 0;
 	float max_distance = 0;
 	float signal_max_distance = 0;
 	float signal_peak_value = 0;
 	float print_signal_peak = 0;
 	// needed values
+
 	float peak_value = 0;
 	float period_ref = 0;
 	float signal_period_ref = 0;
@@ -340,14 +341,14 @@ void main (void)
 	float phase_diff = 0;
 	float print_phase = 0;
 	float temp_volts = 0;
-	float print_measured_amplitude = 0;
 	float print_measured_frequency = 0;
 	float print_ref_amplitude = 0;
 	float print_ref_frequency = 0;
 
 	// display
-	char buffer1[16];
+	xdata char buffer1[16];
 //	char buffer2[16];
+	int i = 0;
 
     waitms(500); // Give PuTTy a chance to start before sending
 	printf("\x1b[2J"); // Clear screen using ANSI escape sequence.
@@ -422,9 +423,9 @@ void main (void)
 			//printf("Timer0 Low: %u\n", TL0);
 			waitms(400);
 			print_ref_frequency = 1.0/(2.0*noise_filter);
-			printf("\nReference Frequency: %.5f Hz", print_ref_frequency);
+			printf("\nReference Frequency:%.5f", print_ref_frequency);
 		} else {
-			printf("\nReference Frequency: %.5f Hz", print_ref_frequency);
+			printf("\nReference Frequency:%.5f", print_ref_frequency);
 		}
 		
 		
@@ -453,9 +454,14 @@ void main (void)
 		} // Wait for the signal to be zero
 		TR0=0; // Stop timer 0
 
-		printf("\nReference Amplitude: %.5f", peak_value);
+
+		if(peak_value < 0.001){
+			printf("\nReference Amplitude:%.5f", print_ref_amplitude);
+		} else {
+			print_ref_amplitude = peak_value;
+			printf("\nReference Amplitude:%.5f", print_ref_amplitude);
+		}
 		peak_value = 0;
-		
 		
 		/*Code for Second set of non-reference signals*/
 		/**********************************************/
@@ -521,9 +527,9 @@ void main (void)
 			//printf("Timer0 Low: %u\n", TL0);
 			waitms(400);
 			print_measured_frequency = 1.0/(2.0*noise_filter);
-			printf("\nMeasured Frequency: %.5f Hz", print_measured_frequency);
+			printf("\nMeasured Frequency:%.5f", print_measured_frequency);
 		} else {
-			printf("\nMeasured Frequency: %.5f Hz", print_measured_frequency);
+			printf("\nMeasured Frequency:%.5f", print_measured_frequency);
 		}
 		
 		
@@ -554,10 +560,10 @@ void main (void)
 		TR0=0; // Stop timer 0
 		
 		if(signal_peak_value < 0.001){
-			printf("\nMeasured Amplitude: %.5f", print_signal_peak);
+			printf("\nMeasured Amplitude:%.5f", print_signal_peak);
 		} else {
 			print_signal_peak = signal_peak_value;
-			printf("\nMeasured Amplitude: %.5f", print_signal_peak);
+			printf("\nMeasured Amplitude:%.5f", print_signal_peak);
 		}
 		signal_peak_value = 0;
 		
@@ -573,28 +579,55 @@ void main (void)
 		while (P2_1 == 1); // Wait for the reference to be zero
 		while (P2_1 == 0); // Wait for the reference to be one
 		TR0 = 1;		   // Start Timer when reference phasor crosses 0
-		while (P2_3 == 1){
-		} // Wait for the signal to be 0
+		while (P2_3 != 0){
+			if(TF0 == 1){
+				TF0 = 0;
+				overflow_count++;
+			}
+		} 
+		while(P2_3 == 0){
+			if(TF0 == 1){
+				TF0 = 0;
+				overflow_count++;
+			}
+		}
+		// Wait for the signal to be 
 		// Stop timer after 0 cross
 		TR0 = 0;
 		time_diff = (overflow_count * 65536.0+TH0 * 256.0 + TL0)* (12.0 / SYSCLK);
 
-		phase_diff = -1*(180.0-((1000*time_diff*360.0)/period_ref)); // 
+		phase_diff = (((time_diff*360.0)/(1/print_ref_frequency))); // 
+		//printf("\nDebugging:%.5f\n", phase_diff);
 		
-		if(phase_diff > 175 || phase_diff < -175){
-			printf("\nRelative phase: %.5f\n", print_phase);
-		} else {
-			print_phase = phase_diff;
-			printf("\nRelative phase: %.5f\n", print_phase);
+		print_phase = phase_diff;
+		//if(phase_diff < 0 || phase_diff < -175){
+		if(phase_diff < 0){
+			print_phase = -1*print_phase;
+			printf("\nRelative Phase:%.5f\n", print_phase);
 		}
+		else {
+			printf("\nRelative Phase:%.5f\n", 180-print_phase);
+		}
+			//printf("\nRelative Phase:%.5f\n", print_phase);
+		//} else {
+		//	print_phase = phase_diff;
+		//	printf("\nRelative Phase:%.5f\n", print_phase);
+		//}
 
-		
+		if(P3_7 == 1){
 		sprintf(buffer1, "RMS=%1.1fV,f:%4.0f", print_signal_peak/1.41421356237,print_ref_frequency );
+		} else {
+		sprintf(buffer1, "Pk=%1.1fV,f:%4.0f", print_signal_peak,print_ref_frequency );
+		}
 		
     	LCDprint(buffer1, 1, 1);
-    		
-		
-    	sprintf(buffer1, "P=%.1f", print_phase);
+    	
+		if(phase_diff < 0) {
+			sprintf(buffer1, "P=%.1f LAGGING", print_phase);
+		}
+		else {
+    	sprintf(buffer1, "P=%.1f LEADING", -1*print_phase);
+		}
 		
     	LCDprint2(buffer1, 2, 1);
 		

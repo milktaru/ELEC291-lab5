@@ -9,7 +9,7 @@ xsize=100
 
 # configure the serial port
 ser = serial.Serial(
-    port='COM3',
+    port='COM6',
     baudrate=115200,
     parity=serial.PARITY_NONE,
     stopbits=serial.STOPBITS_TWO,
@@ -19,64 +19,79 @@ ser.isOpen()
 
 def data_gen():
     t = data_gen.t
+    amp_ref = 0  # Initialize variables here
+    freq_ref = 0
+    amp_measured = 0
+    freq_measured = 0
+    phase_measured = 0
     while True:
-       t+=1
+        t+=1
         # Read a line from the serial port
         line = ser.readline().decode().strip()
+
+        print("Received line:", line)  # Print the received line for debugging
+
+        if line.startswith('\n'):
+            # If it starts with '\n', remove the first character
+            line = line[1:]
+
         # Split the line to extract values
-        values = line.split(':')
-        if len(values) == 2:
-            key, value = values
-            if key == 'Reference Frequency':
-                freq_ref = float(value)
-            elif key == 'Reference Amplitude':
-                amp_ref = float(value)
-            elif key == 'Measured Frequency':
-                freq_measured = float(value)
-            elif key == 'Measured Amplitude':
-                amp_measured = float(value)
-            elif key == 'Relative Phase':
-                phase_measured = float(value)
-       yield t, freq_ref, amp_ref, freq_measured, amp_measured, phase_measured
+        try:
+            key, value = line.split(':')
+            key = key.strip()
+            value = float(value.strip())  # Convert value to float
+        except ValueError:
+            print("Error: Unable to split line into key-value pair:", line)
+            continue  # Skip processing this line
+
+        #if len(values) == 2:
+            #key, value = values
+        if key == 'Reference Frequency':
+            freq_ref = float(value)
+        elif key == 'Reference Amplitude':
+            amp_ref = float(value)
+        elif key == 'Measured Frequency':
+            freq_measured = float(value)
+        elif key == 'Measured Amplitude':
+            amp_measured = float(value)
+        elif key == 'Relative Phase':
+            phase_measured = float(value)
+        
+        val_ref=amp_ref*math.sin(t*2.0*3.1415*freq_ref)  
+        val_other=amp_measured*math.sin(t*2.0*np.pi*freq_measured + (phase_measured)*np.pi/180)
+        # yield t, freq_ref, amp_ref, freq_measured, amp_measured, phase_measured
+        yield t, val_ref, val_other
 
 def run(data):
     # update the data
-    t, freq_ref, amp_ref, freq_measured, amp_measured, phase_measured = data
-    if t>-1:
+    t, val_ref, val_other = data
+    if t > -1:
         xdata.append(t)
-        freq_ref_data.append(freq_ref)
-        amp_ref_data.append(amp_ref)
-        freq_measured_data.append(freq_measured)
-        amp_measured_data.append(amp_measured)
-        phase_measured_data.append(phase_measured)
-        if t>xsize: # Scroll to the left.
-            ax.set_xlim(t-xsize, t)
-        line_freq_ref.set_data(xdata, freq_ref_data)
-        line_amp_ref.set_data(xdata, amp_ref_data)
-        line_freq_measured.set_data(xdata, freq_measured_data)
-        line_amp_measured.set_data(xdata, amp_measured_data)
-        line_phase_measured.set_data(xdata, phase_measured_data)
+        val_ref_data.append(val_ref)
+        val_other_data.append(val_other)
+        if t > xsize:  # Scroll to the left.
+            ax.set_xlim(max(0, t - 30), t)
+        line_val_ref.set_data(xdata, val_ref_data)
+        line_val_other.set_data(xdata, val_other_data)
 
-        return line_freq_ref, line_amp_ref, line_phase_ref, line_freq_measured, line_amp_measured, line_phase_measured
+        return line_val_ref, line_val_other
+
+def on_close_figure(event):
+    sys.exit(0)
 
 data_gen.t = -1
 fig = plt.figure()
 fig.canvas.mpl_connect('close_event', on_close_figure)
 ax = fig.add_subplot(111)
-line_freq_ref, = ax.plot([], [], lw=2, label="Frequency (Ref)")
-line_amp_ref, = ax.plot([], [], lw=2, label="Amplitude (Ref)")
-line_phase_ref, = ax.plot([], [], lw=2, label="Phase (Ref)")
-line_freq_measured, = ax.plot([], [], lw=2, label="Frequency (Measured)")
-line_amp_measured, = ax.plot([], [], lw=2, label="Amplitude (Measured)")
-line_phase_measured, = ax.plot([], [], lw=2, label="Phase (Measured)")
-ax.set_ylim(0, 100)
+line_val_ref, = ax.plot([], [], lw=2, label="Reference Signal")
+line_val_other, = ax.plot([], [], lw=2, label="Other Signal")
+ax.set_ylim(-3.0, 3.0)  # Adjusted the y-limit to better visualize sine waves
 ax.set_xlim(0, xsize)
 ax.grid()
 ax.legend()
 ax.set_ylabel('Values')
-ax.set_xlabel('Time (Half-seconds)')
-xdata, freq_ref_data, amp_ref_data, phase_ref_data = [], [], [], []
-freq_measured_data, amp_measured_data, phase_measured_data = [], [], []
+ax.set_xlabel('Time')
+xdata, val_ref_data, val_other_data = [], [], []
 
 ani = animation.FuncAnimation(fig, run, data_gen, blit=False, interval=100, repeat=False)
 plt.show()
